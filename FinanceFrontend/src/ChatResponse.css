@@ -1,0 +1,28 @@
+.response-markdown {
+    font-size: 19px;
+    line-height: 1.4;
+    color: white;
+    white-space: pre-line;
+  }
+  
+  .response-markdown h3,
+  .response-markdown h2,
+  .response-markdown strong {
+    margin-top: 0em;
+    margin-bottom: 0em;
+    font-weight: bold;
+  }
+  
+  .response-markdown p {
+    margin-bottom: 1rem;
+  }
+  
+  .response-markdown ul {
+    margin-left: 1.25rem;
+    margin-bottom: 1rem;
+  }
+  
+  .response-markdown li {
+    margin-bottom: 0.4rem;
+  }
+  
