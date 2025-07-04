@@ -2,12 +2,12 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 from finance_agent import run_finance_agent
 from fastapi.middleware.cors import CORSMiddleware
-from typing import List, Dict
+from typing import List, Dict,Optional
 
 import json
 class Prompt(BaseModel):
     prompt:str
-    context:List[Dict[str, str]]
+    context: Optional[List[Dict[str, str]]] = []
 
 app = FastAPI()
 

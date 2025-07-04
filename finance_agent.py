@@ -4,79 +4,15 @@ import yfinance as yf
 import datetime
 import pandas as pd
 import json
+from dotenv import load_dotenv
+load_dotenv()
 from scrapeNews import extract_news
-
-def get_Full_ticker(ticker):
-    today_price = yf.Ticker(ticker).history(period="1d")
-    if today_price.empty:
-        for suffix in [".NS",".BO"]:
-            full_ticker = ticker+suffix
-            data = yf.Ticker(full_ticker).history(period="1d")
-            if not data.empty:
-                ticker = full_ticker
-                break
-    else:
-        return ticker
-    
-       
-    today_price = yf.Ticker(ticker).history(period="1d")
-    if today_price.empty:
-        return None
-    else:
-        return ticker
-
-
-def get_stock_price(symbol):
-    ticker = symbol.upper()
-    end_date = datetime.date.today()
-    start_date = end_date-datetime.timedelta(days=30)
-    
-    ticker = get_Full_ticker(ticker)
-       
-    today_price = yf.Ticker(ticker).history(period="1d")
-   
-    data = yf.download(ticker,start=start_date,end=end_date,auto_adjust=True, progress=False)
-   
-    close_prices=data['Close']
-    avg = close_prices.mean()
-    
-    recent =today_price['Close'].iloc[-1]
-    return f"The 30-day average for {ticker}: ₹{avg[ticker]:.2f}\nLast closed price: ₹{recent:.2f}"
-
-def analyze_financials(symbol):
-    symbol = symbol.upper()
-    symbol=get_Full_ticker(symbol)
-    ticker = yf.Ticker(symbol)
-    info = ticker.info
-    quarterly_cash_flow = ticker.quarterly_cashflow
-    latest_column=quarterly_cash_flow.columns[0]
-
-    keys = [
-    "Free Cash Flow",
-    "Capital Expenditure",
-    "Operating Cash Flow",
-    "Net Income From Continuing Operations"
-    ]
-    summary={}
-    for key in keys:
-        if key in quarterly_cash_flow.index:
-            value = quarterly_cash_flow.loc[key,latest_column]
-            summary[key]=value
-        else:
-            summary[key] = "N/A"
-
-    summary['Market Cap']=info.get("marketCap")
-    summary['P/E Ratio'] = info.get("trailingPE")
-    lines=[]
-    for key,value in summary.items():
-        lines.append(f"{key}: Rupees {value:.0f}")
-    formatted = "\n".join(lines)
-    return formatted
+from tickerMap import company_ticker_map
+from functions import analyze_financials,analyze_sector,get_Full_ticker,get_stock_price
 
 
 
-
-client = Groq(api_key="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")
+client = Groq(api_key=os.environ.get("GROQ_API_KEY"))
 
 
 tools=[
@@ -115,6 +51,28 @@ tools=[
                 }
             }
         },
+        {
+                "type": "function",
+                "function": {
+                    "name": "analyze_sector",
+                    "description": "Analyze the sector by inferring it from a stock ticker (e.g., 'TCS sector analysis','Tell me how the sector related to CIPLA is doing ').",
+
+                    "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "symbol": {
+                        "type": "string",
+                        "description": "A stock ticker (e.g., TCS.NS or AAPL). If provided, the sector will be inferred from this ticker."
+                        },
+                        "sector": {
+                        "type": "string",
+                        "description": "The name of the sector (e.g., 'it', 'pharma', 'banking'). If no ticker is provided, this will be used directly."
+                        }
+                    },
+                    "required": []
+                }
+            }
+        }
 
     ]
 
@@ -188,120 +146,361 @@ def classify_levl(user_prompt):
     return chat_completion.choices[0].message.content.strip().lower()
 
 
-def run_finance_agent(user_prompt,conversation_hist):
+# def run_finance_agent(user_prompt,conversation_hist):
+#     level = classify_levl(user_prompt)
+#     print(len(conversation_hist))
+#     sector_analysis_added = False
+
+#     print(user_prompt)
+#     conversation_hist=conversation_hist[-3:]
+#     chat_completion = client.chat.completions.create(
+#         messages=[
+#         {    "role":"system",
+#                 "content":f"""
+#         You are a smart AI finance chatbot.
+
+#         The user is a **{level}** investor:
+        
+#         -  Beginner: explain financial terms briefly and clearly.
+#         -  Amateur: use relevant financial vocabulary, but keep things clear.
+#         - Seasoned: go deep into financial metrics, use ratios, and be concise.
+
+#         Your goal is to analyze the stock data, adapt your tone accordingly, and provide a summary + investment verdict.
+        
+#         - Use good spacing and give section wise content 
+#         -Please include relevant emojis to make the response more engaging.
+#             Use emojis like 📈 for growth, 💰 for profits, ⚠️ for risk, ✅ for strong fundamentals, 📉 for decline, and ⭐️ for final verdicts.
+#             """
+            
+#         },
+#         *conversation_hist,
+#         {
+#                 "role":"user",
+#             "content":user_prompt
+#     ,
+#         }
+#         ],
+#         model="llama3-70b-8192"
+#     ,
+#         tools=tools,
+#         tool_choice="auto",
+#         max_completion_tokens=500
+#     )
+#     #print(chat_completion.choices[0].message)
+#     message = chat_completion.choices[0].message
+#     if message.tool_calls is None:
+#         return message.content  # This is a true fallback — no tool was ever planned
+
+
+#     tool_outputs = []
+#     sentiment_added = False
+
+
+#     for tool_call in message.tool_calls:
+#         function_name = tool_call.function.name
+#         argument = json.loads(tool_call.function.arguments)
+#         print(function_name)
+
+#         if argument.get('symbol') and not sentiment_added:
+#             sentiment = sentiment_analysis(argument['symbol'])
+#             #print(sentiment)
+#             tool_outputs.append(f"📰 **Market Sentiment Analysis for {argument['symbol']}**:\n{sentiment}")
+#             sentiment_added=True
+
+        
+#         if function_name=='get_stock_price':
+#             result = get_stock_price(argument['symbol'])
+#             tool_outputs.append(f"📈 Stock Price Info:\n{result}")
+#             print(result)
+            
+#         elif function_name=='analyze_financials':
+#             summary = analyze_financials(argument['symbol'])
+#             prompt = f"""
+#             Here is the financial summary of {argument['symbol']}:
+
+#             {summary}
+
+#             Give an investment attractiveness score out of 100 and explain briefly.
+#             - Use `**bold headings**` for sections like Stock Price,Sentiment Analysis,Financial Insights, Verdict, etc.
+#             "Use emojis like ✅ 📈 💰 🚀 🟢 for positive, ❌ ⚠️ 📉 🔻 🔴 for negative, and 📎 🟡 🤝 for neutral. Add them at the start of bullet points or section headers."
+#             - Use bullet points `*` or `-` for each fact or insight.
+#             - Add line breaks between paragraphs for better readability.
+#             -Please include relevant emojis to make the response more engaging.
+#             Use emojis like 📈 for growth, 💰 for profits, ⚠️ for risk, ✅ for strong fundamentals, 📉 for decline, and ⭐️ for final verdicts.            
+
+#             """
+#             tool_outputs.append(f"{prompt}")
+#         elif function_name=='analyze_sector':
+#             if argument.get('symbol'):
+#                 sector_analysis=analyze_sector(argument['symbol'],"")
+            
+#                 prompt = f"""
+#                         📊 **Sector Financial Analysis**
+
+#                         Here is a summary of the financial performance of the top companies in this sector:
+
+#                         {sector_analysis}
+
+#                         ✅ Use this information to evaluate the overall health of the sector based on profitability, valuation, and growth metrics.
+
+#                         📌 If a stock ticker was provided, compare its performance with these top companies across key metrics like Free Cash Flow, P/E Ratio, and Revenue Growth like:
+                                        
+#                             📌 Mention 1–2 quick insights at the end such as:
+#                             - Which company leads in revenue growth?
+#                             - Which has the strongest cash flow or best valuation?
+
+#                         """
+#                 tool_outputs.append(prompt)
+#                 sector_analysis_added = True
+
+#     # Fallback: if no tool call was made, but user asked for sector info
+#     if message.tool_calls is None and "sector" in user_prompt.lower() and not sector_analysis_added:
+#         # Try to extract ticker from prompt
+#         from difflib import get_close_matches
+
+#         def extract_ticker_from_prompt(prompt):
+#             prompt = prompt.lower()
+#             company_names = list(company_ticker_map.keys())
+#             matches = get_close_matches(prompt, company_names, n=1, cutoff=0.6)
+#             if matches:
+#                 return company_ticker_map[matches[0]]
+#             return None
+
+#         fallback_ticker = extract_ticker_from_prompt(user_prompt)
+#         if fallback_ticker:
+#             sector_analysis = analyze_sector(fallback_ticker, "")
+#             prompt = f"""
+#     📊 **Sector Financial Analysis (via {fallback_ticker})**
+
+#     Here is a summary of the financial performance of the top companies in this sector:
+
+#     {sector_analysis}
+
+#     ✅ Use this information to evaluate the overall health of the sector based on profitability, valuation, and growth metrics.
+
+#     📌 Compare this company with sector peers on:
+#     - Free Cash Flow
+#     - P/E Ratio
+#     - Revenue Growth
+#     - Net Income
+#     - Debt-to-Equity
+#     - Market Cap
+
+#     🎯 Format insights cleanly with a markdown table if possible.
+#     """
+#             tool_outputs.append(prompt)
+
+
+#     final_prompt = "\n\n".join(tool_outputs)
+
+#     followup_messages = [
+#         {
+#             "role":"system",
+#             "content": """
+#             You are a helpful financial assistant. Use clear, engaging, and structured formatting with relevant emojis.
+
+#             - Use emojis like ✅ 📈 💰 🚀 🟢 for positive, ❌ ⚠️ 📉 🔻 🔴 for negative, and 📎 🟡 🤝 for neutral.
+#             - Start section headings and bullet points with appropriate emojis.
+#             - Add section headers like **Stock Price**, **Market Sentiment**, **Financials**, and **Final Verdict**.
+#             - Make your response not less than 300 words.
+#             - When doing sentiment analysis try to explain them in sentences rather than giving short verdicts
+#             -If relevant news not found skip it.
+#             """
+#         },
+       
+#         {
+#             "role":"user",
+#             "content": final_prompt,
+#         }
+#     ]
+
+
+#     summary_response = client.chat.completions.create(
+#             model="llama3-70b-8192",
+#             messages=followup_messages,
+#             max_tokens=500
+#         )
+    
+#     assistant_reply= summary_response.choices[0].message.content
+
+#     return assistant_reply
+
+
+
+
+def clean_response(text):
+    text = text.replace("\n\n\n", "\n\n").strip()
+    if "final verdict" not in text.lower():
+        text += "\n\n⭐ Final Verdict: More information is needed for a conclusive analysis."
+    return text
+
+
+def run_finance_agent(user_prompt, conversation_hist):
     level = classify_levl(user_prompt)
-    print(len(conversation_hist))
-    print(user_prompt)
-    conversation_hist=conversation_hist[-3:]
+    conversation_hist = conversation_hist[-3:]
+    price_called = False
+    tool_outputs = {
+        "price": "",
+        "sentiment": "",
+        "financials": "",
+        "sector": ""
+    }
+
+    # Initial system + user message to let LLM route tools
     chat_completion = client.chat.completions.create(
         messages=[
-        {    "role":"system",
-                "content":f"""
-        You are a smart AI finance chatbot.
+            {
+                                    "role": "system",
+                                    "content": f"""
+                    You are a smart AI finance chatbot.
 
-        The user is a **{level}** investor:
-        
-        -  Beginner: explain financial terms briefly and clearly.
-        -  Amateur: use relevant financial vocabulary, but keep things clear.
-        - Seasoned: go deep into financial metrics, use ratios, and be concise.
+                    The user is a **{level}** investor:
+                    - Beginner: explain financial terms briefly and clearly.
+                    - Amateur: use relevant financial vocabulary, but keep things clear.
+                    - Seasoned: go deep into financial metrics, use ratios, and be concise.
 
-        Your goal is to analyze the stock data, adapt your tone accordingly, and provide a summary + investment verdict.
-        
-        - Use good spacing and give section wise content 
-        -Please include relevant emojis to make the response more engaging.
-            Use emojis like 📈 for growth, 💰 for profits, ⚠️ for risk, ✅ for strong fundamentals, 📉 for decline, and ⭐️ for final verdicts.
-            """
-            
-        },
-        *conversation_hist,
-        {
-                "role":"user",
-            "content":user_prompt
-    ,
-        }
+                    Provide a well-structured analysis with section headers like **Stock Price**, **Sentiment**, **Financials**, **Verdict**. Use emojis like 📈, 💰, ⚠️, ✅, 📉, and ⭐.
+                    """
+            },
+            *conversation_hist,
+            {"role": "user", "content": user_prompt}
         ],
-        model="llama3-70b-8192"
-    ,
+        model="llama3-70b-8192",
         tools=tools,
         tool_choice="auto",
         max_completion_tokens=500
     )
-    #print(chat_completion.choices[0].message)
+
     message = chat_completion.choices[0].message
-    if message.tool_calls is None:
-        return message.content  # This is a true fallback — no tool was ever planned
+    tool_calls = message.tool_calls
 
+    if tool_calls is None:
+        return message.content
 
-    tool_outputs = []
+    sentiment_added = False
 
-    for tool_call in message.tool_calls:
+    for tool_call in tool_calls:
         function_name = tool_call.function.name
         argument = json.loads(tool_call.function.arguments)
-        print(function_name)
+        symbol = argument.get("symbol", "").upper()
 
-        if argument['symbol']:
-            sentiment = sentiment_analysis(argument['symbol'])
-            tool_outputs.append(f"📰 **Market Sentiment Analysis for {argument['symbol']}**:\n{sentiment}")
+        if symbol and not sentiment_added:
+            try:
+                sentiment = sentiment_analysis(symbol)
+                tool_outputs["sentiment"] = f"📰 **Market Sentiment Analysis for {symbol}**:\n{sentiment}"
+                sentiment_added = True
+            except Exception as e:
+                tool_outputs["sentiment"] = f"⚠️ Failed to fetch sentiment: {str(e)}"
 
-        
-        if function_name=='get_stock_price':
-            result = get_stock_price(argument['symbol'])
-            tool_outputs.append(f"📈 Stock Price Info:\n{result}")
-            
-        elif function_name=='analyze_financials':
-            summary = analyze_financials(argument['symbol'])
-            prompt = f"""
-            Here is the financial summary of {argument['symbol']}:
+        try:
+            if function_name == "get_stock_price":
+                result = get_stock_price(symbol)
+                tool_outputs["price"] = f"📈 **Stock Price Info for {symbol}**:\n{result}"
+                price_called = True
+            elif function_name == "analyze_financials":
+                summary = analyze_financials(symbol)
+                tool_outputs["financials"] = f"""💰 **Financial Analysis for {symbol}**:
 
-            {summary}
+                                            {summary}
 
-            Give an investment attractiveness score out of 100 and explain briefly.
-            - Use `**bold headings**` for sections like Stock Price,Sentiment Analysis,Financial Insights, Verdict, etc.
-            "Use emojis like ✅ 📈 💰 🚀 🟢 for positive, ❌ ⚠️ 📉 🔻 🔴 for negative, and 📎 🟡 🤝 for neutral. Add them at the start of bullet points or section headers."
-            - Use bullet points `*` or `-` for each fact or insight.
-            - Add line breaks between paragraphs for better readability.
-            -Please include relevant emojis to make the response more engaging.
-            Use emojis like 📈 for growth, 💰 for profits, ⚠️ for risk, ✅ for strong fundamentals, 📉 for decline, and ⭐️ for final verdicts.            
+                                            Give an investment attractiveness score out of 100 and explain briefly using:
+                                            - ✅ for positives
+                                            - ⚠️ for risks
+                                            - ⭐ for final verdict"""
 
-            """
-            tool_outputs.append(f"{prompt}")
+            elif function_name == "analyze_sector":
+                sector_data = analyze_sector(symbol, argument.get("sector", ""))
+                tool_outputs["sector"] = f"""📊 **Sector Analysis (via {symbol})**:
 
+                        {sector_data}
 
+                        Compare company metrics like FCF, P/E, growth, and summarize 1–2 insights.
+                        """
+        except Exception as e:
+            tool_outputs[function_name] = f"❌ Tool `{function_name}` failed: {str(e)}"
 
-    final_prompt = "\n\n".join(tool_outputs)
+   
+    if tool_calls is None and "sector" in user_prompt.lower():
+        from difflib import get_close_matches
+        prompt = user_prompt.lower()
+        company_names = list(company_ticker_map.keys())
+        matches = get_close_matches(prompt, company_names, n=1, cutoff=0.6)
+        if matches:
+            fallback_symbol = company_ticker_map[matches[0]]
+            try:
+                sector_data = analyze_sector(fallback_symbol, "")
+                tool_outputs["sector"] = f"""📊 **Sector Analysis (via {fallback_symbol})**:\n{sector_data}"""
+            except:
+                pass
+    # Enforce stock price if missed
+    if not price_called:
+    # Try to extract a fallback symbol from tool calls or prompt
+        fallback_symbol = None
+
+        for tool_call in tool_calls:
+            args = json.loads(tool_call.function.arguments)
+            if "symbol" in args:
+                fallback_symbol = args["symbol"]
+                break
+
+        if not fallback_symbol:
+            # Try to extract from user_prompt using fuzzy match
+            from difflib import get_close_matches
+            matches = get_close_matches(user_prompt.lower(), company_ticker_map.keys(), n=1, cutoff=0.6)
+            if matches:
+                fallback_symbol = company_ticker_map[matches[0]]
+
+        if fallback_symbol:
+            try:
+                result = get_stock_price(fallback_symbol)
+                tool_outputs["price"] = f"📈 **Stock Price Info for {fallback_symbol} (forced)**:\n{result}"
+            except Exception as e:
+                tool_outputs["price"] = f"⚠️ Could not fetch stock price for {fallback_symbol}: {str(e)}"
+
+        if not tool_outputs["price"]:
+                tool_outputs["price"] = "📈 **Stock Price:** Not available due to missing data."
+    
+        if not tool_outputs["financials"]:
+                 tool_outputs["financials"] = "💰 **Financials:** Not available at the moment."
+
+        if not tool_outputs["sentiment"]:
+                tool_outputs["sentiment"] = "📰 **Sentiment:** No relevant news or data found. 📎"
+
+    # Assemble final prompt
+    final_prompt = "\n\n".join(
+        section for section in tool_outputs.values() if section.strip()
+    )
 
     followup_messages = [
         {
-            "role":"system",
-            "content": """
-            You are a helpful financial assistant. Use clear, engaging, and structured formatting with relevant emojis.
-
-            - Use emojis like ✅ 📈 💰 🚀 🟢 for positive, ❌ ⚠️ 📉 🔻 🔴 for negative, and 📎 🟡 🤝 for neutral.
-            - Start section headings and bullet points with appropriate emojis.
-            - Add section headers like **Stock Price**, **Market Sentiment**, **Financials**, and **Final Verdict**.
-            - Make your response not less than 300 words.
-            - When doing sentiment analysis try to explain them in sentences rather than giving short verdicts
+                        "role": "system",
+                        "content": """
+            You are a helpful financial assistant. Your goals:
+            - Use section headers like 📈 Stock Price, 📰 Sentiment, 💰 Financials, ⭐ Final Verdict.
+            - Use bullet points for clarity, and keep tone professional.
+            - Use emojis: ✅ 📈 💰 🚀 🟢 for positives, ❌ ⚠️ 📉 🔻 🔴 for negatives, 📎 🟡 🤝 for neutral.
+            - Response should be informative, not less than 300 words.
             """
         },
-       
         {
-            "role":"user",
+            "role": "user",
             "content": final_prompt,
         }
     ]
 
-
     summary_response = client.chat.completions.create(
-            model="llama3-70b-8192",
-            messages=followup_messages,
-            max_tokens=500
-        )
-    
-    assistant_reply= summary_response.choices[0].message.content
+        model="llama3-70b-8192",
+        messages=followup_messages,
+        max_tokens=800,
+        temperature=0.2
+    )
 
-    return assistant_reply
-
-# print(run_finance_agent("AAPL stock price",[]))
+    return clean_response(summary_response.choices[0].message.content)
 
 
+#print(run_finance_agent("Can you analyze TCS's stock price",[]))
+#print(sentiment_analysis("TCS"))
 
+
+
+#print(sentiment_analysis("CIPLA"))
